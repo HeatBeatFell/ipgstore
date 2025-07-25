@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { Input } from "@/components/ui/input";
 
 interface DataPreviewProps {
   data: Array<Record<string, string | number | null>>;
@@ -10,6 +11,7 @@ interface DataPreviewProps {
   searchQuery?: string;
   costValueField?: string;
   priceField?: string;
+  onUpdateCostValue?: (rowIndex: number, value: string | number | null) => void;
 }
 
 export function DataPreview({
@@ -21,10 +23,16 @@ export function DataPreview({
   totalItems,
   searchQuery,
   costValueField,
-  priceField
+  priceField,
+  onUpdateCostValue
 }: DataPreviewProps) {
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
   const [hoveredHeader, setHoveredHeader] = useState<string | null>(null);
+  const [editingCell, setEditingCell] = useState<{ rowIndex: number | null, field: string | null }>({
+    rowIndex: null,
+    field: null
+  });
+  const [editValue, setEditValue] = useState<string>("");
   
   // 如果没有传入总条数，默认使用当前数据长度
   const totalCount = totalItems !== undefined ? totalItems : (data ? data.length : 0);
@@ -35,7 +43,48 @@ export function DataPreview({
     // 直接检查列名是否为"成本"或"商品金额"
     if (header === "成本") return 'cost';
     if (header === "商品金额") return 'price';
+    if (costValueField && header === costValueField) return 'cost';
     return null;
+  };
+
+  // 检查一行是否未匹配成功（成本值为null）
+  const isUnmatched = (row: Record<string, string | number | null>) => {
+    if (!costValueField) return false;
+    return row[costValueField] === null || row[costValueField] === '';
+  };
+
+  // 处理编辑开始
+  const handleEditStart = (rowIndex: number, field: string, value: string | number | null) => {
+    setEditingCell({ rowIndex, field });
+    setEditValue(value !== null ? String(value) : "");
+  };
+
+  // 处理编辑取消
+  const handleEditCancel = () => {
+    setEditingCell({ rowIndex: null, field: null });
+    setEditValue("");
+  };
+
+  // 处理编辑保存
+  const handleEditSave = (rowIndex: number) => {
+    if (onUpdateCostValue && editingCell.field === costValueField) {
+      // 转换编辑值为适当的类型
+      let valueToSave: string | number | null = editValue;
+      
+      // 如果字段是成本字段，尝试转换为数字
+      if (editValue === "") {
+        valueToSave = null;
+      } else {
+        const numValue = Number(editValue);
+        if (!isNaN(numValue)) {
+          valueToSave = numValue;
+        }
+      }
+      
+      onUpdateCostValue(rowIndex, valueToSave);
+    }
+    
+    handleEditCancel();
   };
 
   if (!data || data.length === 0) {
@@ -161,12 +210,15 @@ export function DataPreview({
           <tbody className="divide-y divide-muted/30">
             {data.map((row, rowIndex) => {
               const rowId = `row-${rowIndex}-${Object.values(row)[0]?.toString().slice(0, 5) || rowIndex}`;
+              const isRowUnmatched = costValueField && isUnmatched(row);
+              
               return (
                 <tr 
                   key={rowId} 
                   className={`
                     transition-colors duration-150
                     ${rowIndex % 2 === 0 ? "bg-background" : "bg-muted/5"}
+                    ${isRowUnmatched ? "bg-red-50/30 dark:bg-red-900/5" : ""}
                     ${hoveredRow === rowIndex ? "bg-primary/5" : ""}
                     hover:bg-primary/5
                   `}
@@ -181,6 +233,11 @@ export function DataPreview({
                       '';
                     
                     const isEmpty = row[header] === null || row[header] === '';
+                    const isEditable = costValueField && header === costValueField;
+                    const isEditing = editingCell.rowIndex === rowIndex && editingCell.field === header;
+                    
+                    // 判断是否是未匹配的成本单元格
+                    const isUnmatchedCostCell = isEditable && isEmpty;
                     
                     return (
                       <td 
@@ -191,11 +248,90 @@ export function DataPreview({
                           ${hoveredHeader === header ? 'bg-opacity-80' : ''}
                           ${cellStyle}
                           ${hoveredRow === rowIndex ? 'bg-opacity-90' : ''}
+                          ${isEditable ? 'cursor-pointer hover:bg-primary/10' : ''}
+                          ${isEditing ? 'p-0 px-0' : ''}
+                          ${isUnmatchedCostCell ? 'border border-dashed border-red-300 dark:border-red-800' : ''}
                         `}
+                        onClick={isEditable && !isEditing ? () => handleEditStart(rowIndex, header, row[header]) : undefined}
+                        title={isEditable ? "点击编辑成本值" : ""}
                       >
-                        <div className="truncate max-w-xs">
-                          {!isEmpty ? String(row[header]) : "-"}
-                        </div>
+                        {isEditing ? (
+                          <div className="flex items-center border p-1 bg-background shadow-sm rounded-sm w-full">
+                            <Input
+                              className="h-8 m-0 border-none focus-visible:ring-1 focus-visible:ring-primary rounded-sm text-foreground bg-background px-2 w-full"
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  handleEditSave(rowIndex);
+                                } else if (e.key === 'Escape') {
+                                  handleEditCancel();
+                                }
+                              }}
+                              onBlur={() => handleEditSave(rowIndex)}
+                              placeholder="输入成本值，回车确认..."
+                            />
+                          </div>
+                        ) : (
+                          <div className={`truncate max-w-xs flex items-center ${isEditable ? 'group' : ''}`}>
+                            {!isEmpty ? (
+                              <span>{String(row[header])}</span>
+                            ) : (
+                              <span className={`${isUnmatchedCostCell ? 'text-red-500 dark:text-red-400 flex items-center gap-1' : ''}`}>
+                                {isUnmatchedCostCell ? (
+                                  <>
+                                    <svg 
+                                      xmlns="http://www.w3.org/2000/svg" 
+                                      width="12" 
+                                      height="12" 
+                                      viewBox="0 0 24 24" 
+                                      fill="none" 
+                                      stroke="currentColor" 
+                                      strokeWidth="2" 
+                                      strokeLinecap="round" 
+                                      strokeLinejoin="round"
+                                    >
+                                      <circle cx="12" cy="12" r="10"></circle>
+                                      <line x1="12" y1="8" x2="12" y2="12"></line>
+                                      <line x1="12" y1="16" x2="12.01" y2="16"></line>
+                                    </svg>
+                                    未匹配
+                                  </>
+                                ) : (
+                                  "-"
+                                )}
+                              </span>
+                            )}
+                            
+                            {isEditable && (
+                              <button
+                                className={`ml-1 ${isUnmatchedCostCell ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'} focus:opacity-100 transition-opacity`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleEditStart(rowIndex, header, row[header]);
+                                }}
+                                title="编辑成本值"
+                              >
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  width="12"
+                                  height="12"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className={`${isUnmatchedCostCell ? 'text-red-500' : 'text-primary/70'}`}
+                                >
+                                  <path d="M12 20h9"></path>
+                                  <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                                </svg>
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </td>
                     );
                   })}

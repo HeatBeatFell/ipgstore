@@ -81,9 +81,25 @@ export default function Home() {
   const [searchInputValue, setSearchInputValue] = useState("");
   const [isSearching, setIsSearching] = useState(false);
 
+  // 过滤类型
+  const [filterType, setFilterType] = useState<"all" | "matched" | "unmatched">("all");
+
   // 过滤后的数据
   const filteredData = useMemo(() => {
-    if (!resultData.length || !searchState.query) return resultData;
+    if (!resultData.length) return resultData;
+    
+    // 首先按匹配状态过滤
+    let filtered = resultData;
+    if (filterType !== "all" && selectedOrderCostField) {
+      filtered = resultData.filter(item => {
+        const costValue = item[selectedOrderCostField];
+        const isMatched = costValue !== null && costValue !== '';
+        return filterType === "matched" ? isMatched : !isMatched;
+      });
+    }
+    
+    // 如果没有搜索查询，直接返回按匹配状态过滤的结果
+    if (!searchState.query) return filtered;
 
     // 商品名称、商家编码、子订单编号可能的字段名映射
     const fieldMapping = {
@@ -92,7 +108,8 @@ export default function Home() {
       subOrderId: ["subOrderId", "sub_order_id", "orderItemId", "order_item_id", "子订单编号", "子订单号", "订单项编号"],
     };
 
-    return resultData.filter((item) => {
+    // 再根据搜索条件过滤
+    return filtered.filter((item) => {
       // 如果选择全部字段，尝试在所有值中搜索
       if (searchState.field === "all") {
         return Object.values(item).some((value) => value !== null && String(value).toLowerCase().includes(searchState.query.toLowerCase()));
@@ -110,7 +127,7 @@ export default function Home() {
         return value !== null && String(value).toLowerCase().includes(searchState.query.toLowerCase());
       });
     });
-  }, [resultData, searchState.query, searchState.field]);
+  }, [resultData, searchState.query, searchState.field, filterType, selectedOrderCostField]);
 
   // 当前页数据
   const currentPageData = useMemo(() => {
@@ -568,6 +585,7 @@ export default function Home() {
     });
     setSearchInputValue("");
     setIsSearching(false);
+    setFilterType("all"); // 重置过滤类型
 
     // 重置文件上传组件状态
     if (costFileInputRef.current) {
@@ -596,8 +614,62 @@ export default function Home() {
     setSelectedOrderCostField(value);
   };
 
+  // 处理编辑成本值
+  const handleUpdateCostValue = (rowIndex: number, value: string | number | null) => {
+    // 计算实际行索引（考虑分页）
+    const actualIndex = (pagination.currentPage - 1) * pagination.pageSize + rowIndex;
+    
+    // 更新结果数据
+    const newResultData = [...resultData];
+    if (actualIndex >= 0 && actualIndex < newResultData.length && selectedOrderCostField) {
+      newResultData[actualIndex] = {
+        ...newResultData[actualIndex],
+        [selectedOrderCostField]: value
+      };
+      
+      // 更新统计数据
+      const oldValue = resultData[actualIndex][selectedOrderCostField];
+      const hasOldValue = oldValue !== null && oldValue !== '';
+      const hasNewValue = value !== null && value !== '';
+      
+      if (!hasOldValue && hasNewValue) {
+        // 未匹配 -> 匹配
+        setStats(prev => ({
+          ...prev,
+          matchedCount: prev.matchedCount + 1,
+          unmatchedCount: prev.unmatchedCount - 1
+        }));
+      } else if (hasOldValue && !hasNewValue) {
+        // 匹配 -> 未匹配
+        setStats(prev => ({
+          ...prev,
+          matchedCount: prev.matchedCount - 1,
+          unmatchedCount: prev.unmatchedCount + 1
+        }));
+      }
+      
+      setResultData(newResultData);
+      
+      // 显示成功提示
+      toast.success("成本值已更新", {
+        id: `cost-update-${Date.now()}`,
+        duration: 2000
+      });
+    }
+  };
+
   // 判断是否可以进行合并预览
   const canMergePreview = costData.length > 0 && orderData.length > 0 && !processing && !fileProcessing.cost && !fileProcessing.order && selectedCostMerchantCode && selectedOrderMerchantCode && selectedOrderCostField;
+
+  // 处理过滤类型变化
+  const handleFilterTypeChange = (value: string) => {
+    setFilterType(value as "all" | "matched" | "unmatched");
+    // 切换过滤类型时重置到第一页
+    setPagination(prev => ({
+      ...prev,
+      currentPage: 1
+    }));
+  };
 
   // 如果页面加载中，显示加载动画
   if (pageLoading) {
@@ -886,6 +958,95 @@ export default function Home() {
                   </SelectContent>
                 </Select>
 
+                {/* 添加匹配状态过滤器 */}
+                <Select value={filterType} onValueChange={handleFilterTypeChange}>
+                  <SelectTrigger className="w-[160px] h-9 bg-muted/30">
+                    <div className="flex items-center gap-2">
+                      <svg 
+                        xmlns="http://www.w3.org/2000/svg" 
+                        width="14" 
+                        height="14" 
+                        viewBox="0 0 24 24" 
+                        fill="none" 
+                        stroke="currentColor" 
+                        strokeWidth="2" 
+                        strokeLinecap="round" 
+                        strokeLinejoin="round" 
+                        className="text-primary/70"
+                      >
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3"></path>
+                        <path d="M21 8V5a2 2 0 0 0-2-2h-3"></path>
+                        <path d="M3 16v3a2 2 0 0 0 2 2h3"></path>
+                        <path d="M16 21h3a2 2 0 0 0 2-2v-3"></path>
+                      </svg>
+                      <SelectValue placeholder="选择数据状态" />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem key="filter-all" value="all">
+                      <span className="flex items-center gap-2">
+                        <svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          width="14" 
+                          height="14" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round"
+                        >
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                          <line x1="9" y1="9" x2="15" y2="15"></line>
+                          <line x1="15" y1="9" x2="9" y2="15"></line>
+                        </svg>
+                        全部数据
+                      </span>
+                    </SelectItem>
+                    <SelectItem key="filter-matched" value="matched">
+                      <span className="flex items-center gap-2">
+                        <svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          width="14" 
+                          height="14" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round" 
+                          className="text-green-500"
+                        >
+                          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                          <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                        </svg>
+                        已匹配数据
+                      </span>
+                    </SelectItem>
+                    <SelectItem key="filter-unmatched" value="unmatched">
+                      <span className="flex items-center gap-2">
+                        <svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          width="14" 
+                          height="14" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round" 
+                          className="text-red-500"
+                        >
+                          <circle cx="12" cy="12" r="10"></circle>
+                          <line x1="15" y1="9" x2="9" y2="15"></line>
+                          <line x1="9" y1="9" x2="15" y2="15"></line>
+                        </svg>
+                        未匹配数据
+                      </span>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+
                 <div className="relative flex-1">
                   <Input placeholder="搜索..." className="pl-9" value={searchInputValue} onChange={(e) => setSearchInputValue(e.target.value)} onKeyDown={handleKeyDown} disabled={isSearching} />
                   <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -915,40 +1076,120 @@ export default function Home() {
                 </Button>
               </div>
 
-              {searchState.query && (
+              {(searchState.query || filterType !== "all") && (
                 <div className="mt-2 text-xs flex items-center justify-between">
-                  <div>
-                    <span className="text-muted-foreground">搜索: </span>
-                    <span className="text-primary font-medium">{searchState.query}</span>
-                    <span className="text-muted-foreground ml-2">搜索字段: </span>
-                    <span className="text-primary font-medium flex items-center gap-1 inline-flex">
-                      {searchState.field === "all" ? (
-                        <>
-                          <Search className="h-3 w-3" />
-                          全部字段
-                        </>
-                      ) : searchState.field === "productName" ? (
-                        <>
-                          <FileSpreadsheet className="h-3 w-3 text-blue-500" />
-                          商品名称
-                        </>
-                      ) : searchState.field === "merchantCode" ? (
-                        <>
-                          <Hash className="h-3 w-3 text-amber-500" />
-                          商家编码
-                        </>
-                      ) : (
-                        <>
-                          <FileDigit className="h-3 w-3 text-green-500" />
-                          子订单编号
-                        </>
-                      )}
-                    </span>
+                  <div className="flex items-center flex-wrap gap-2">
+                    {searchState.query && (
+                      <div className="flex items-center">
+                        <span className="text-muted-foreground">搜索: </span>
+                        <span className="text-primary font-medium ml-1">{searchState.query}</span>
+                        <span className="text-muted-foreground ml-2">字段: </span>
+                        <span className="text-primary font-medium flex items-center gap-1 inline-flex ml-1">
+                          {searchState.field === "all" ? (
+                            <>
+                              <Search className="h-3 w-3" />
+                              全部字段
+                            </>
+                          ) : searchState.field === "productName" ? (
+                            <>
+                              <FileSpreadsheet className="h-3 w-3 text-blue-500" />
+                              商品名称
+                            </>
+                          ) : searchState.field === "merchantCode" ? (
+                            <>
+                              <Hash className="h-3 w-3 text-amber-500" />
+                              商家编码
+                            </>
+                          ) : (
+                            <>
+                              <FileDigit className="h-3 w-3 text-green-500" />
+                              子订单编号
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    )}
+                    
+                    {filterType !== "all" && (
+                      <div className="flex items-center ml-2 border-l pl-2">
+                        <span className="text-muted-foreground">状态过滤: </span>
+                        <span className="text-primary font-medium flex items-center gap-1 ml-1">
+                          {filterType === "matched" ? (
+                            <>
+                              <svg 
+                                xmlns="http://www.w3.org/2000/svg" 
+                                width="12" 
+                                height="12" 
+                                viewBox="0 0 24 24" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                strokeWidth="2" 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round" 
+                                className="text-green-500"
+                              >
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+                                <polyline points="22 4 12 14.01 9 11.01"></polyline>
+                              </svg>
+                              已匹配
+                            </>
+                          ) : (
+                            <>
+                              <svg 
+                                xmlns="http://www.w3.org/2000/svg" 
+                                width="12" 
+                                height="12" 
+                                viewBox="0 0 24 24" 
+                                fill="none" 
+                                stroke="currentColor" 
+                                strokeWidth="2" 
+                                strokeLinecap="round" 
+                                strokeLinejoin="round" 
+                                className="text-red-500"
+                              >
+                                <circle cx="12" cy="12" r="10"></circle>
+                                <line x1="15" y1="9" x2="9" y2="15"></line>
+                                <line x1="9" y1="9" x2="15" y2="15"></line>
+                              </svg>
+                              未匹配
+                            </>
+                          )}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
-                  <button className="text-muted-foreground hover:text-primary flex items-center gap-1" onClick={handleClearSearch} disabled={isSearching}>
-                    清除搜索 <X className="h-3 w-3" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    {filterType !== "all" && (
+                      <button 
+                        className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1"
+                        onClick={() => setFilterType("all")}
+                      >
+                        清除过滤 
+                        <svg 
+                          xmlns="http://www.w3.org/2000/svg" 
+                          width="12" 
+                          height="12" 
+                          viewBox="0 0 24 24" 
+                          fill="none" 
+                          stroke="currentColor" 
+                          strokeWidth="2" 
+                          strokeLinecap="round" 
+                          strokeLinejoin="round"
+                        >
+                          <line x1="18" y1="6" x2="6" y2="18"></line>
+                          <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                      </button>
+                    )}
+                    
+                    {searchState.query && (
+                      <button className="text-xs text-muted-foreground hover:text-primary flex items-center gap-1" onClick={handleClearSearch} disabled={isSearching}>
+                        清除搜索 
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -968,7 +1209,18 @@ export default function Home() {
                     <p className="mt-2 text-sm text-muted-foreground">正在搜索&quot;{searchInputValue}&quot;</p>
                   </div>
                 ) : (
-                  <DataPreview data={currentPageData} title="" currentPage={pagination.currentPage} pageSize={pagination.pageSize} onPageChange={handlePageChange} totalItems={filteredData.length} searchQuery={searchState.query} costValueField={selectedOrderCostField} priceField={""} />
+                  <DataPreview 
+                    data={currentPageData} 
+                    title="" 
+                    currentPage={pagination.currentPage} 
+                    pageSize={pagination.pageSize} 
+                    onPageChange={handlePageChange} 
+                    totalItems={filteredData.length} 
+                    searchQuery={searchState.query} 
+                    costValueField={selectedOrderCostField} 
+                    priceField={""} 
+                    onUpdateCostValue={handleUpdateCostValue}
+                  />
                 )}
               </div>
             ) : (
